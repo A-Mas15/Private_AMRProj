@@ -1,0 +1,50 @@
+<launch>
+    <!-- Set TurtleBot3 Model -->
+    <arg name="turtlebot3_model" default="waffle" />
+    <env name="TURTLEBOT3_MODEL" value="$(arg turtlebot3_model)" />
+
+    <!-- Load Gazebo World -->
+    <include file="$(find gazebo_ros)/launch/empty_world.launch">
+        <arg name="world_name" default="$(find simple_traj)/world/EmptyWorld/EmptyWorld.world" />
+        <arg name="paused" value="false"/>
+        <arg name="use_sim_time" value="true"/>
+        <!-- TO modify the physics -->
+        <arg name="gui" value="true"/>
+        <arg name="physics" value="ode"/>
+        <arg name="headless" value="false"/>
+        <arg name="debug" value="true"/>
+    </include>
+<!-- 
+    <node name="controller_spawner" pkg="controller_manager" type="spawner" respawn="false"
+          output="screen" args="joint_state_controller"/> -->
+
+    <!-- MODIFIED -->
+    <!-- Diff Drive Odometry Plugin -->
+    <!-- <node name="diff_drive_controller" pkg="controller_manager" type="spawner" -->
+          <!-- args="diff_drive_controller" /> -->
+
+
+    <!-- ROS Map Server for Occupancy Grid -->
+    <!-- <node pkg="map_server" type="map_server" name="map_server" args="$(find simple_traj)/world/EmptyWorld/map.yaml" /> -->
+
+    <!-- Path publisher -->
+    <!-- <node name="path_publisher" pkg="simple_traj" type="main.py" output="screen"/> -->
+
+    <!-- Controller Node -->
+    <!-- <node pkg="simple_traj" type="controller_static.py" name="controller" output="screen"/> -->
+
+
+    <!-- Upload TurtleBot3 URDF -->
+    <param name="robot_description" command="$(find xacro)/xacro '$(find turtlebot3_description)/urdf/turtlebot3_$(arg turtlebot3_model).urdf.xacro'" />
+
+    <node pkg="gazebo_ros" type="spawn_model" name="spawn_urdf" args="-urdf -model turtlebot3_$(arg turtlebot3_model) -x 0.0 -y 0.0 -z 0.0 -param robot_description" />
+
+    <!-- Robot state publisher -->
+    <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" output="screen"/>
+
+    <!-- Spawn the TurtleBot3 Waffle 
+    Commented out since it is already spawned in the simulation.
+
+    <node name="spawn_turtlebot" pkg="gazebo_ros" type="spawn_model" 
+        args="-param robot_description -urdf -model turtlebot3_waffle -x 0 -y 0 -z 0" /> -->
+</launch>
