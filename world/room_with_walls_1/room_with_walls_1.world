@@ -1,0 +1,100 @@
+<?xml version='1.0'?>
+<sdf version='1.7'>
+  <world name='default'>
+
+    <!-- Sunlight -->
+    <light name='sun' type='directional'>
+      <cast_shadows>1</cast_shadows>
+      <pose>0 0 10 0 -0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <attenuation>
+        <range>1000</range>
+        <constant>0.9</constant>
+        <linear>0.01</linear>
+        <quadratic>0.001</quadratic>
+      </attenuation>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <!-- Ground Plane -->
+    <model name='ground_plane'>
+      <static>1</static>
+      <link name='link'>
+        <collision name='collision'>
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>100 100</size>
+            </plane>
+          </geometry>
+        </collision>
+        <visual name='visual'>
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>100 100</size>
+            </plane>
+          </geometry>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Include Room with Walls Model -->
+    <include>
+      <uri>model://room_with_walls_10x10</uri>
+      <pose>0 0 0 0 0 0</pose>
+    </include>
+
+    <!-- TurtleBot at Start Position -->
+    <include>
+      <uri>model://turtlebot3_burger</uri>
+      <pose>1 1 0 0 0 0</pose> <!-- Adjust coordinates inside the walls -->
+    </include>
+
+    <!-- Start Marker -->
+    <model name='start_marker'>
+      <pose>1 1 0 0 0 0</pose> <!-- Inside the walls -->
+      <static>1</static>
+      <link name='link'>
+        <visual name='visual'>
+          <geometry>
+            <sphere>
+              <radius>0.2</radius>
+            </sphere>
+          </geometry>
+          <material>
+            <ambient>0 1 0 1</ambient>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Goal Marker -->
+    <model name='goal_marker'>
+      <pose>7 7 0 0 0 0</pose> <!-- Also inside the walls -->
+      <static>1</static>
+      <link name='link'>
+        <visual name='visual'>
+          <geometry>
+            <sphere>
+              <radius>0.2</radius>
+            </sphere>
+          </geometry>
+          <material>
+            <ambient>1 0 0 1</ambient>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- GUI Settings -->
+    <gui fullscreen='0'>
+      <camera name='user_camera'>
+        <pose>5 -5 5 0 0.275643 2.35619</pose>
+        <view_controller>orbit</view_controller>
+      </camera>
+    </gui>
+
+  </world>
+</sdf>

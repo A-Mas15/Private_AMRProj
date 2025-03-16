@@ -1,0 +1,39 @@
+<launch>
+    <!-- Set TurtleBot3 Model -->
+    <arg name="turtlebot3_model" default="waffle" />
+    <env name="TURTLEBOT3_MODEL" value="$(arg turtlebot3_model)" />
+
+    <!-- Load Gazebo World -->
+    <include file="$(find gazebo_ros)/launch/empty_world.launch">
+        <!--         <arg name="world_name" default="$(find static_rrt)/world/FixedWorldV1/FixedObstaclesV1.world" /> -->
+        <arg name="world_name" default="$(find static_rrt)/world/FixedWorldV1/FixedObstaclesV1.world" />
+        <arg name="paused" value="false"/>
+        <arg name="use_sim_time" value="true"/>
+        <arg name="gui" value="true"/>
+        <arg name="physics" value="ode"/>
+        <arg name="headless" value="false"/>
+        <arg name="debug" value="false"/> 
+    </include>
+
+    <!-- ROS Map Server for Occupancy Grid -->
+    <node pkg="map_server" type="map_server" name="map_server" args="$(find static_rrt)/world/FixedWorldV1/map.yaml" />
+
+    <!-- RRT* Path Planning Node -->
+    <node pkg="static_rrt" type="main.py" name="rrt_path_planner" output="screen"/>
+
+    <!-- Controller Node -->
+    <node pkg="static_rrt" type="controller_static.py" name="controller" output="screen"/>
+
+    <!-- Map Listener -->
+    <node pkg="static_rrt" type="occupancy_grid.py" name="map_listener" output="screen"/>
+
+    <!-- Upload TurtleBot3 URDF -->
+    <param name="robot_description" command="$(find xacro)/xacro '$(find turtlebot3_description)/urdf/turtlebot3_$(arg turtlebot3_model).urdf.xacro'" />
+
+    <node pkg="gazebo_ros" type="spawn_model" name="spawn_urdf" args="-urdf -model turtlebot3_$(arg turtlebot3_model) -x 0.0 -y 0.0 -z 0.0 -param robot_description" />
+
+    <!-- Robot state publisher -->
+    <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" output="screen"/>
+    
+</launch>
+

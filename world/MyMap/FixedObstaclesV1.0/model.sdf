@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<sdf version="1.7">
+  <model name="FixedObstaclesV1.0">
+  <!-- Set the obstacle map at the center -->
+    <pose>0 0 0 0 0 0</pose>
+
+     <!-- Scale may need to be modified to be correct -->
+    <scale>10 10 2</scale>
+
+    <!-- Obstacles are static -->
+    <static>true</static>
+    <link name="link">
+      <visual name="visual">
+        <geometry>
+          <box>
+            <size>2 0.5 1</size>
+          </box>
+        </geometry>
+        <material>
+          <ambient>0.5 0.5 0.5 1</ambient>
+        </material>
+      </visual>
+      <collision name="collision">
+        <geometry>
+          <box>
+            <size>2 0.5 1</size>
+          </box>
+        </geometry>
+      </collision>
+    </link>
+  </model>
+</sdf>
+

@@ -1,0 +1,7 @@
+image: /home/anna/Desktop/AMR24-FP9-DynamicRRT/ROS-GAZEBO/catkin_ws/src/static_rrt/world/room_with_walls_1/map_0.05m-px.pgm
+resolution: 0.10000
+origin: [-10.000000, -10.000000, 0.000000]
+negate: 0
+occupied_thresh: 0.65
+free_thresh: 0.196
+
