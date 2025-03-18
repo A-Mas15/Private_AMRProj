@@ -3,7 +3,7 @@ import rospy
 from nav_msgs.msg import OccupancyGrid, Path, Odometry
 from geometry_msgs.msg import PoseStamped, Twist
 from gazebo_msgs.srv import GetModelState
-from tf.transformations import euler_from_quaternion
+from tf.transformations import euler_from_quaternion, quaternion_from_euler
 import math
 from math import cos as c
 from math import sin as s
@@ -65,16 +65,25 @@ class PathPublisher:
         path_msg = Path()
         path_msg.header.frame_id = "map"
 
+        # Compute approximate theta for each point
+        for i in range(len(trajectory)):
+            x, y = trajectory[i]
+
+            if i < len(trajectory) - 1:
+                x_next, y_next = trajectory[i + 1]
+                theta = math.atan2(y_next - y, x_next - x)  # Estimate theta
+            else:
+                theta = math.atan2(y - trajectory[i - 1][1], x - trajectory[i - 1][0]) 
         # Formats the path for a ROS message
-        for x, y in trajectory:
             pose = PoseStamped()
             pose.header.frame_id = "map"
             pose.pose.position.x = x
             pose.pose.position.y = y
-            theta = math.atan2(y, x)
-            quaternion = euler_from_quaternion([0, 0, theta])
-            pose.pose.orientation.w = quaternion[3]
+            quaternion = quaternion_from_euler([0, 0, theta])
+            pose.pose.orientation.x = quaternion[0]
+            pose.pose.orientation.y = quaternion[1]
             pose.pose.orientation.z = quaternion[2]
+            pose.pose.orientation.w = quaternion[3]
             path_msg.poses.append(pose)
 
         rospy.loginfo("Waiting for subscribers to /planned_path...")
@@ -95,6 +104,7 @@ class Controller:
         rospy.Subscriber('/odom', Odometry, self.odom_callback)
 
         self.trajectory = []
+        self.inputs = []
         self.current_index = 0
         self.unicycle = Unicycle()
         self.rate = rospy.Rate(10)
