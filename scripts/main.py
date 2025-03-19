@@ -15,8 +15,6 @@ from unicycle_kinematics import Unicycle
 class PathPublisher:
     """ Creates and pubished the path """   
     def __init__(self):
-        # Initialize the node for path planner and publishes on it
-        rospy.init_node('path_planner', anonymous=True)
         self.pub = rospy.Publisher('/planned_path', Path, queue_size=10)
         
         # Subscribes to the map
@@ -46,46 +44,54 @@ class PathPublisher:
     def publish_path(self):
         if self.map is None:
             rospy.logerr("Map not initialized, cannot generate path.")
-            return
+            return None
 
-        # Get start and goal position from the map
         q_in = self.map.get_start()
         q_f = self.map.get_goal()
 
         if q_in is None:
             rospy.logerr("Start not found! Exiting.")
-            return
-        
+            return None
         if q_f is None:
-            rospy.logerr("Goal not found! Exiting,")
+            rospy.logerr("Goal not found! Exiting.")
+            return None
 
-        # Generates the trajectory
-        trajectory = Unicycle().plan_trajectory(q_in, q_f)["points"]
+        trajectory = Unicycle().plan_trajectory(q_in, q_f)
+        # DEBUGGING PRINT
+        if not isinstance(trajectory, dict):
+            rospy.logerr("plan_trajectory() returned unexpected type: %s", type(trajectory))
+            return
 
         path_msg = Path()
         path_msg.header.frame_id = "map"
 
-        # Compute approximate theta for each point
-        for i in range(len(trajectory)):
-            x, y = trajectory[i]
+         # Extract points and inputs
+        computed_path = trajectory["points"]
+        computed_inputs = trajectory["inputs"]
 
-            if i < len(trajectory) - 1:
-                x_next, y_next = trajectory[i + 1]
-                theta = math.atan2(y_next - y, x_next - x)  # Estimate theta
+        for i in range(len(computed_path)):
+            x, y = computed_path[i]
+            if i < len(computed_path) - 1:
+                # Compute theta based on the next point
+                x_next, y_next = computed_path[i + 1]
+                theta = math.atan2(y_next - y, x_next - x)
             else:
-                theta = math.atan2(y - trajectory[i - 1][1], x - trajectory[i - 1][0]) 
-        # Formats the path for a ROS message
+                # If it's the last point, set theta to 0.0
+                theta = 0.0
+            
+            # ROS message formatting
             pose = PoseStamped()
             pose.header.frame_id = "map"
             pose.pose.position.x = x
             pose.pose.position.y = y
-            quaternion = quaternion_from_euler([0, 0, theta])
+            quaternion = quaternion_from_euler(0, 0, theta)
             pose.pose.orientation.x = quaternion[0]
             pose.pose.orientation.y = quaternion[1]
             pose.pose.orientation.z = quaternion[2]
             pose.pose.orientation.w = quaternion[3]
             path_msg.poses.append(pose)
 
+        # Wait for subscribers
         rospy.loginfo("Waiting for subscribers to /planned_path...")
         while self.pub.get_num_connections() == 0 and not rospy.is_shutdown():
             rospy.sleep(0.1)
@@ -100,9 +106,9 @@ class Controller:
     def __init__(self):
         # Initialize the node and substives to planned_path and odometry
         self.cmd_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
+        rospy.Subscriber('/odom', Odometry, self.odom_callback)        
         rospy.Subscriber('/planned_path', Path, self.path_callback)
-        rospy.Subscriber('/odom', Odometry, self.odom_callback)
-
+        
         self.trajectory = []
         self.inputs = []
         self.current_index = 0
@@ -131,14 +137,14 @@ class Controller:
                                              pose.pose.orientation.w])[2]) for pose in msg.poses]
         # Iterate through the waypoints in pairs to generate trajectory segments
         for i in range(len(waypoints) - 1):
-            segment = Unicycle().plan_trajectory(waypoints[i], waypoints[i+1])["points"]
+            segment = Unicycle().plan_trajectory(waypoints[i], waypoints[i+1])
+            if isinstance(segment, dict):
+                self.trajectory.extend(segment["points"])
+                self.inputs.extend(segment["inputs"])
+            else:
+                rospy.logerr("plan_trajectory() returned unexpected type: %s", type(segment))
 
-            # Append the segment to the full trajectory
-            self.trajectory.extend(segment["points"])
-            # Save also velocity commands
-            self.inputs.extend(segment["inputs"])
 
-        # Reset index for trajectory tracking
         self.current_index = 0
         rospy.loginfo("Received trajectory with %d points.", len(self.trajectory))
 
@@ -159,7 +165,7 @@ class Controller:
         v_th = 0.05
         while not rospy.is_shutdown():
             if not self.trajectory:
-                rospy.logwarn("No trajectory available. Waiting for path...")
+                #rospy.logwarn("No trajectory available. Waiting for path...")
                 continue
 
             if self.current_index < len(self.trajectory):
@@ -168,6 +174,7 @@ class Controller:
                 
                 # Given from the Unicycle class
                 v_des, omega_des = self.inputs[self.current_index]
+                a_des = self.unicycle.get_acceleration()
                 desired_theta = math.atan2(p_des[1] - self.rob_y, p_des[0] - self.rob_x)
 
                 p = np.array([self.rob_x, self.rob_y])
@@ -179,8 +186,8 @@ class Controller:
                 omega_error = omega_des - self.omega_curr # Angular velocity error
 
                 # PD Controller
-                # Computes desired a. Missing ddot{x}. Need a way to get it.
-                a_d = self.Kp * p_error + self.Kd * v_error
+                # Computes desired a
+                a_des += self.Kp * p_error + self.Kd * v_error
 
                 # If v_curr is too small, use a P controller
                 if(abs(self.v_curr) < v_th):
@@ -190,9 +197,9 @@ class Controller:
                     # self.omega_curr = self.k_omega * heading_error
                 else:
                     # Matrix T
-                    T = np.array([c(self.rob_theta), - self.v_curr*s(c(self.rob_theta))],
-                                 [s(self.rob_theta), self.v_curr*c(self.rob_theta)])
-                    u = np.dot(np.linalg.inv(T), a_d)
+                    T = np.array([[c(self.rob_theta), -self.v_curr * s(self.rob_theta)],
+                                [s(self.rob_theta), self.v_curr * c(self.rob_theta)]])
+                    u = np.dot(np.linalg.inv(T), a_des)
                     a_cmd = u[0] # Acceleration comand
                     omega_cmd = u[1] # Angular velocity comanf
                     # Apply acceleration limits
@@ -222,6 +229,10 @@ class Controller:
         return angle
 
 if __name__ == "__main__":
-    path_publisher = PathPublisher()
+    rospy.init_node("simple_traj_node", anonymous=True)
     controller = Controller()
+    rospy.sleep(2)  # Ensure controller subscribes before publishing
+    path_publisher = PathPublisher()
+    rospy.sleep(2)
+    path_publisher.publish_path()
     controller.run()

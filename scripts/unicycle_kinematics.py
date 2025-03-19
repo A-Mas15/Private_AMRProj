@@ -11,6 +11,8 @@ class Unicycle():
                            'trajectory_time': 0.5,
                            'trajectory_sampling_step': 0.005}
         self.dt =self.parameters['trajectory_sampling_step']
+        # MODIFIED
+        self.acceleration = 0.0
     
     def plan_trajectory(self, q_in, q_fin, map_width = None, map_height = None):
         """Hyperparameters: -T: trajectory time (possible improvement we can implement minimum time tarjectory planning)
@@ -59,11 +61,14 @@ class Unicycle():
 
             ddx_t = ddx * 1/(T ** 2)
             ddy_t = ddy * 1/(T ** 2)
-
             # Recontstruction Formulas
             theta = math.atan2(dy_t,dx_t)
             v_t = math.sqrt(dx_t **2 + dy_t**2) 
-            w_t = (ddy_t * dx_t - dy_t * ddx_t)/(dx_t**2 + dy_t**2) 
+            w_t = (ddy_t * dx_t - dy_t * ddx_t)/(dx_t**2 + dy_t**2)
+
+            # MODIFIED
+            self.set_acceleration(math.sqrt(ddx_t**2 + ddy_t**2))
+            
     
             t += self.dt
             trajectory['inputs'].append([v_t,w_t])
@@ -178,3 +183,12 @@ class Unicycle():
 #     # print('Q right', Q[2])
 # 
 # 
+
+
+    # MODIFIED
+    def set_acceleration(self, acc):
+        self.acceleration = acc
+        return
+    
+    def get_acceleration(self):
+        return self.acceleration

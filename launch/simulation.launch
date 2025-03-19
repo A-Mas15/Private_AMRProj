@@ -18,7 +18,7 @@
     <!-- ROS Map Server for Occupancy Grid -->
     <node pkg="map_server" type="map_server" name="map_server" args="$(find simple_traj)/world/EmptyWorld/map.yaml" />
     <!-- Path publisher -->
-    <node name="path_publisher" pkg="simple_traj" type="main.py" output="screen"/> 
+    <node name="simple_traj_node" pkg="simple_traj" type="main.py" output="screen"/> 
     
 
     <!-- Upload TurtleBot3 URDF -->
