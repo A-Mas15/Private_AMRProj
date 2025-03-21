@@ -1,238 +1,178 @@
 #!/usr/bin/env python3
-import rospy
-from nav_msgs.msg import OccupancyGrid, Path, Odometry
-from geometry_msgs.msg import PoseStamped, Twist
-from gazebo_msgs.srv import GetModelState
-from tf.transformations import euler_from_quaternion, quaternion_from_euler
-import math
-from math import cos as c
-from math import sin as s
+import rospy, time
 import numpy as np
+from nav_msgs.msg import OccupancyGrid, Odometry
+from geometry_msgs.msg import Twist
+from tf.transformations import euler_from_quaternion
+from controller import Controller
 from map import Map
-from unicycle_kinematics import Unicycle
+from RRT import RRTStar
 
 
-class PathPublisher:
-    """ Creates and pubished the path """   
-    def __init__(self):
-        self.pub = rospy.Publisher('/planned_path', Path, queue_size=10)
+def main():
+    """
+    Main function of the code. Executes the following steps:
+    1) Initialization,
+    2) extract map data
+    3) path planning via RRT*,
+    4) trajectory tracking via PD+DFL controller
+    """
+
+    # Some global variables
+    global cmd_pub, map, current_pose, current_velocity
+
+    # Step 1: initialization
+    rospy.init_node('rrt_planner', anonymous=True)
+
+    # Subscribe to topics /map, to get the occupancy grid, and /odom, to get information on the robot as it moves
+    rospy.Subscriber('/map', OccupancyGrid, map_callback)
+    rospy.Subscriber('/odom', Odometry, odom_callback)
+    # Publish velocity comands on the topic /cmd_vel
+    cmd_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
+    rospy.loginfo("Waiting for the map to be published...")
+    
+    map = None
+    controller = Controller()
+    executed_path = {'nodes': [], 'edges': []}
+
+    # Step 2: extract map data
+    try:
+        msg = rospy.wait_for_message("/map", OccupancyGrid, timeout=10)
+        map = map_callback(msg)
+    except rospy.ROSException:
+        rospy.logerr("Timed out waiting for the map! Make sure map_server is running.")
+        return
+    # Some buffer time, to avoid starting planning process before the map is fully initialized
+    rospy.sleep(1)
+    map_width, map_height = map.width, map.height
+
+     # Get start and goal position from the map
+    current_pose = map.start
+    executed_path['nodes'].append(current_pose)
+    goal_x, goal_y, goal_theta = map.goal
+
+    if current_pose is None:
+        rospy.logerr("Start not found! Exiting.")
+        return
         
-        # Subscribes to the map
-        rospy.Subscriber("/map", OccupancyGrid, self.map_callback)
-        self.map = None
-        rospy.loginfo("Waiting for the map to be published...")
-        
-        # Waits 10s for the map
-        try:
-            msg = rospy.wait_for_message("/map", OccupancyGrid, timeout=10)
-            self.map_callback(msg)
-        except rospy.ROSException:
-            rospy.logerr("Timed out waiting for the map! Make sure map_server is running.")
+    if goal_x is None:
+        rospy.logerr("Goal not found! Exiting,")
+
+    # Step 3: path planning via RRT*
+    rrt = RRTStar(map)
+    join_start = False
+    for iter in range(rrt.MAX_ITER):
+        if iter >= rrt.MAX_ITER -1: # if it is the last iteration, try to join the goal
+            join_start =True
+
+        string = rrt.update_tree(join_start= join_start)
+        if string == 'No path exist':
+            rospy.logerr(f'No possible paths have been found in {rrt.MAX_ITER} iterations') 
             return
+        rrt.output_best_path()
+        rospy.loginfo("RRT path planning complete. Starting trajectory tracking")
 
-        # Some buffer time, to avoid starting planning process before the map is fully initialized
-        rospy.sleep(1)
-        self.publish_path()
-
-
-    # Stores the map data
-    def map_callback(self, msg):
-        if self.map is None: # Only initialize the map once!
-            self.map = Map(msg)
-            rospy.loginfo("Map received and initialized.")
-
-    def publish_path(self):
-        if self.map is None:
-            rospy.logerr("Map not initialized, cannot generate path.")
-            return None
-
-        q_in = self.map.get_start()
-        q_f = self.map.get_goal()
-
-        if q_in is None:
-            rospy.logerr("Start not found! Exiting.")
-            return None
-        if q_f is None:
-            rospy.logerr("Goal not found! Exiting.")
-            return None
-
-        trajectory = Unicycle().plan_trajectory(q_in, q_f)
-        # DEBUGGING PRINT
-        if not isinstance(trajectory, dict):
-            rospy.logerr("plan_trajectory() returned unexpected type: %s", type(trajectory))
-            return
-
-        path_msg = Path()
-        path_msg.header.frame_id = "map"
-
-         # Extract points and inputs
-        computed_path = trajectory["points"]
-        computed_inputs = trajectory["inputs"]
-
-        for i in range(len(computed_path)):
-            x, y = computed_path[i]
-            if i < len(computed_path) - 1:
-                # Compute theta based on the next point
-                x_next, y_next = computed_path[i + 1]
-                theta = math.atan2(y_next - y, x_next - x)
-            else:
-                # If it's the last point, set theta to 0.0
-                theta = 0.0
-            
-            # ROS message formatting
-            pose = PoseStamped()
-            pose.header.frame_id = "map"
-            pose.pose.position.x = x
-            pose.pose.position.y = y
-            quaternion = quaternion_from_euler(0, 0, theta)
-            pose.pose.orientation.x = quaternion[0]
-            pose.pose.orientation.y = quaternion[1]
-            pose.pose.orientation.z = quaternion[2]
-            pose.pose.orientation.w = quaternion[3]
-            path_msg.poses.append(pose)
-
-        # Wait for subscribers
-        rospy.loginfo("Waiting for subscribers to /planned_path...")
-        while self.pub.get_num_connections() == 0 and not rospy.is_shutdown():
-            rospy.sleep(0.1)
-
-        self.pub.publish(path_msg)
-        rospy.loginfo("Path published successfully!")
-
-
-class Controller:
-    """Class that subscribes to the planned path and odometry, then computes velocity commands."""
-
-    def __init__(self):
-        # Initialize the node and substives to planned_path and odometry
-        self.cmd_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=10)
-        rospy.Subscriber('/odom', Odometry, self.odom_callback)        
-        rospy.Subscriber('/planned_path', Path, self.path_callback)
+    # Step 4: trajectory tracking via PD+DFL controller
+    x_prev = current_pose
+    dx_prev = np.array([0.0, 0.0])
+    dt = rrt.unicycle.dt
+    #while current_pose != rrt.goal: due to approximation error, this condition may not be met. Better use this one
+    while np.linalg.norm(np.array(current_pose[:2]) - np.array(rrt.goal[:2])) > 0.1:
+        # map.update_slam()                         # TO BE DONE
+        # new_map = map.get_map()                   # not necessary since when passing MAP to the class RRT it refers to the reference of the object (it updates when the original object updates)
+        rrt.update_tree_structure()
+        next_edge, next_node = rrt.compute_next_path_node(current_pose, executed_path['nodes'])
+        #if find_obstacle(next_edge):
+        #    next_edge, next_node = rrt.replan_path(current_pose, next_node)
         
-        self.trajectory = []
-        self.inputs = []
-        self.current_index = 0
-        self.unicycle = Unicycle()
-        self.rate = rospy.Rate(10)
-
-        # Robot state
-        self.rob_x = 0
-        self.rob_y = 0
-        self.rob_theta = 0
-        self.v_curr = 0.0
-        self.omega_curr = 0.0
-
-        # Control gains
-        self.Kp, self.Kd = 1.5, 1.0
-        self.k_v, self.k_omega = 1.2, 1.5
-        self.dt = 0.1
-        self.max_dot_v, self.max_dot_omega = 0.5, 1.0
-
-    def path_callback(self, msg):
-        # Receives the planned path and stores it as a trajectory
-        waypoints = [(pose.pose.position.x, pose.pose.position.y,
-                      euler_from_quaternion([pose.pose.orientation.x, 
-                                             pose.pose.orientation.y, 
-                                             pose.pose.orientation.z, 
-                                             pose.pose.orientation.w])[2]) for pose in msg.poses]
-        # Iterate through the waypoints in pairs to generate trajectory segments
-        for i in range(len(waypoints) - 1):
-            segment = Unicycle().plan_trajectory(waypoints[i], waypoints[i+1])
-            if isinstance(segment, dict):
-                self.trajectory.extend(segment["points"])
-                self.inputs.extend(segment["inputs"])
-            else:
-                rospy.logerr("plan_trajectory() returned unexpected type: %s", type(segment))
-
-
-        self.current_index = 0
-        rospy.loginfo("Received trajectory with %d points.", len(self.trajectory))
-
-    def odom_callback(self, msg):
-        # Updates the robot's current state (pose and velocities) from odometry
-        self.rob_x = msg.pose.pose.position.x
-        self.rob_y = msg.pose.pose.position.y
-        orientation_q = msg.pose.pose.orientation
-        (_, _, self.rob_theta) = euler_from_quaternion([orientation_q.x, orientation_q.y,
-                                                        orientation_q.z, orientation_q.w])
-        self.v_curr = msg.twist.twist.linear.x
-        self.omega_curr = msg.twist.twist.angular.z
-
-    def run(self):
-        # Control loop
-
-        # Since will be used here and only here, I'll define it as a local variable just in this method
-        v_th = 0.05
-        while not rospy.is_shutdown():
-            if not self.trajectory:
-                #rospy.logwarn("No trajectory available. Waiting for path...")
-                continue
-
-            if self.current_index < len(self.trajectory):
-                # Where we are on the trajectory. x_d on the notes
-                p_des = np.array(self.trajectory[self.current_index])
-                
-                # Given from the Unicycle class
-                v_des, omega_des = self.inputs[self.current_index]
-                a_des = self.unicycle.get_acceleration()
-                desired_theta = math.atan2(p_des[1] - self.rob_y, p_des[0] - self.rob_x)
-
-                p = np.array([self.rob_x, self.rob_y])
-
-                # Errors
-                p_error = p_des - p   # Position error. x_d - x in the notes
-                heading_error = self.normalize_angle(desired_theta - self.rob_theta)
-                v_error = v_des - self.v_curr # Velocity error. \dot{x}_d - \dot{x} in the notes
-                omega_error = omega_des - self.omega_curr # Angular velocity error
-
-                # PD Controller
-                # Computes desired a
-                a_des += self.Kp * p_error + self.Kd * v_error
-
-                # If v_curr is too small, use a P controller
-                if(abs(self.v_curr) < v_th):
-                    self.v_curr = self.k_v * v_error
-                    self.omega_curr = 0
-                    # If we want to correct also rotation as the robot moves 
-                    # self.omega_curr = self.k_omega * heading_error
-                else:
-                    # Matrix T
-                    T = np.array([[c(self.rob_theta), -self.v_curr * s(self.rob_theta)],
-                                [s(self.rob_theta), self.v_curr * c(self.rob_theta)]])
-                    u = np.dot(np.linalg.inv(T), a_des)
-                    a_cmd = u[0] # Acceleration comand
-                    omega_cmd = u[1] # Angular velocity comanf
-                    # Apply acceleration limits
-                    dot_v = max(min(a_cmd, self.max_dot_v), -self.max_dot_v)
-                    dot_omega = max(min(omega_cmd, self.max_dot_omega), -self.max_dot_omega)
-                    # Integrates velocities
-                    self.v_curr += dot_v * self.dt
-                    self.omega_curr += dot_omega * self.dt
-
+        if executed_path['nodes'][-1] != next_node:      #if next_node not in executed_path['nodes']:
+            executed_path['nodes'].append(next_node)
+            executed_path['edges'].append(next_edge)
+            #trajectory_to_track = next_edge
+            trajectory_to_track = rrt.best_path
+        i = 0
+        # Invoke the controller
+        #while i < len(trajectory_to_track):
+        #    x_d = trajectory_to_track[i]
+        #    dx_d = (x_d - x_prev)/dt
+        #    ddx_d = (dx_d - dx_prev)/dt
+        #    x_current = get_current_pose()
+        #    dx_current = get_current_velocity()
+        #    v, omega = controller.track_trajectory(x_d, dx_d, ddx_d, x_current, dx_current) 
+        #    dx_prev = (x_current - x_prev)/dt
+        #    x_prev = x_current
+        #    # Publish command
+        #    twist = Twist()
+        #    twist.linear.x = v
+        #    twist.angular.z = omega
+        #    cmd_pub.publish(twist)
+        #    i += 1
+        #    rospy.loginfo("Reached trajectory point %d/%d", i, len(trajectory_to_track))
+        #time.sleep(2)
+        for edge in trajectory_to_track:  # ✅ Loop through the entire planned path
+            for x_d in edge:  # ✅ Loop through each point in the edge
+                dx_d = (x_d - x_prev)/dt
+                ddx_d = (dx_d - dx_prev)/dt
+                x_current = get_current_pose()
+                dx_current = get_current_velocity()
+                v, omega = controller.track_trajectory(x_d, dx_d, ddx_d, x_current, dx_current) 
+        
+                dx_prev = (x_current - x_prev)/dt
+                x_prev = x_current
+        
                 # Publish command
                 twist = Twist()
-                twist.linear.x = self.v_curr
-                twist.angular.z = self.omega_curr
-                self.cmd_pub.publish(twist)
+                twist.linear.x = v
+                twist.angular.z = omega
+                cmd_pub.publish(twist)
+        
+                rospy.loginfo(f"Following trajectory: {x_d}")
+        
+                time.sleep(0.1)  # Small delay to ensure smooth execution
 
-                if np.linalg.norm(p_error) < 0.1:
-                    self.current_index += 1
-                    rospy.loginfo("Reached trajectory point %d/%d", self.current_index, len(self.trajectory))
+# To get the map from Gazebo
+def map_callback(msg):
+    global map
+    if map is None: # Only initialize the map once!
+        map = Map(msg)
+        rospy.loginfo("Map received and initialized.")
+    return map
 
-            self.rate.sleep()
+# To process robot odometry data (pose, linear and angular velocity)
+def odom_callback(msg):
+    global current_pose, current_velocity
+    position = msg.pose.pose.position # Position of the robot
+    orientation = msg.pose.pose.orientation # Pose of the robot in quaternion
+    (_, _, theta) = euler_from_quaternion([msg.pose.pose.orientation.x, 
+                                             msg.pose.pose.orientation.y, 
+                                             msg.pose.pose.orientation.z, 
+                                             msg.pose.pose.orientation.w]) # We are only interested in the yaw angle, so on theta
+    current_pose = position.x, position.y, theta
+    current_velocity = [msg.twist.twist.linear.x, msg.twist.twist.angular.z]
 
-    def normalize_angle(self, angle):
-        while angle > math.pi:
-            angle -= 2 * math.pi
-        while angle < -math.pi:
-            angle += 2 * math.pi
-        return angle
+def get_current_pose():
+    # Returns the current pose od the robot
+    if current_pose:
+        return current_pose 
+    else:
+        map.start()
+
+def get_current_velocity():
+    # Returns the current velocity of the robot
+    if current_velocity:
+        return current_velocity 
+    else:
+        return [0.0, 0.0]
+
+# Used for dynamic case
+def find_obstacle(next_edge):
+    # Cheks for the presence of an obstacle
+    #Returns:
+    #    True  -> If there is an obstacle
+    #    False -> If there is NO obstacle
+    if map is None:
+        return False  # Assume no obstacles if the map is not available
+    return not map.collision_free(next_edge)
 
 if __name__ == "__main__":
-    rospy.init_node("simple_traj_node", anonymous=True)
-    controller = Controller()
-    rospy.sleep(2)  # Ensure controller subscribes before publishing
-    path_publisher = PathPublisher()
-    rospy.sleep(2)
-    path_publisher.publish_path()
-    controller.run()
+    main()

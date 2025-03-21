@@ -18,11 +18,8 @@
     <!-- ROS Map Server for Occupancy Grid -->
     <node pkg="map_server" type="map_server" name="map_server" args="$(find simple_traj)/world/1_1/mappacubo.yaml" />
     <!-- Path publisher -->
-    <node name="path_publisher" pkg="simple_traj" type="main.py" output="screen"/> 
+    <node name="rrt_planner" pkg="simple_traj" type="main.py" output="screen"/> 
     
-    <!-- Controller Node -->
-    <node pkg="simple_traj" type="controller_static.py" name="controller" output="screen"/>
-
 
     <!-- Upload TurtleBot3 URDF -->
     <param name="robot_description" command="$(find xacro)/xacro '$(find turtlebot3_description)/urdf/turtlebot3_$(arg turtlebot3_model).urdf.xacro'" />

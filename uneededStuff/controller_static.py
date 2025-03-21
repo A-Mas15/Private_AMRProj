@@ -8,6 +8,7 @@ from unicycle_kinematics import Unicycle
 
 
 class Controller:
+    # Controller to track the trajectory
     def __init__(self):
         rospy.init_node('controller', anonymous=True)
         self.cmd_pub = rospy.Publisher('/cmd_vel', Twist, queue_size=10)

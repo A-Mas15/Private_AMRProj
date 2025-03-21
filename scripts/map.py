@@ -23,7 +23,7 @@ class Map:
         # Number of cells along the y axis
         self.height = occupancy_grid.info.height
         # Debugging print
-        print(f"Map size: {self.width} x {self.height}")
+        print(f"Map size FROM MAP: {self.width} x {self.height}")
         # Origin of the map
         self.origin = occupancy_grid.info.origin          
 
@@ -33,10 +33,10 @@ class Map:
         self.grid = np.array(self.grid)
         #self.print_occupancy_grid()
         # Define start and goal configurations (x, y, theta)
-        self.goal_pose = self.get_goal_pose()
-        print(f"Goal pose: {self.goal_pose}")
+        self.goal = self.get_goal_pose()
+        print(f"Goal pose: {self.goal}")
         # Directly from gazebo
-        self.start_pose = self.get_start_pose()
+        self.start = self.get_start_pose()
 
         data = np.array(occupancy_grid.data).reshape((self.height, self.width))
 
@@ -54,87 +54,107 @@ class Map:
 
 
     #Checks if the given trajectory q_traj (list of (x, y, theta) points) is collision-free.
-    #Args:
-    #    q_traj: List of (x, y, theta) positions forming a trajectory.
+    #
 #
-    #Returns:
-    #    True  -> If the trajectory is obstacle-free.
-    #    False -> If any point in the trajectory is in collision.
+    #def collision_free(self, q_traj):
+    #    for q in q_traj:
+    #        x, y = q  # Extract position
 #
-    def collision_free(self, q_traj):
-        for q in q_traj:
-            x, y = q  # Extract position
+    #        # Convert (x, y) world coordinates to grid indices
+    #        grid_x = round((x - self.origin.position.x) / self.resolution)
+    #        grid_y = round((y - self.origin.position.y) / self.resolution)
+    #        
+    #        # Clamp values to ensure they are within map bounds
+    #        grid_x = max(0, min(self.width - 1, grid_x))
+    #        grid_y = max(0, min(self.height - 1, grid_y))
+    #        # Check if the point is out of bounds
+    #        if grid_x < 0 or grid_x >= self.width or grid_y < 0 or grid_y >= self.height:
+    #            rospy.logwarn(f"Trajectory point ({x:.2f}, {y:.2f}) is out of bounds!")
+    #            return False  # Out of bounds = assume collision
+#
+    #        # Check if the point is an obstacle
+    #        if self.grid[grid_y, grid_x] >= 80:  # Obstacle threshold
+    #            rospy.logwarn(f"Trajectory point ({x:.2f}, {y:.2f}) is inside an obstacle!")
+    #            return False  # Collision detected
+#
+    #    return True  # Entire trajectory is collision-free
 
-            # Convert (x, y) world coordinates to grid indices
-            grid_x = round((x - self.origin.position.x) / self.resolution)
-            grid_y = round((y - self.origin.position.y) / self.resolution)
-            
-            # Clamp values to ensure they are within map bounds
-            grid_x = max(0, min(self.width - 1, grid_x))
-            grid_y = max(0, min(self.height - 1, grid_y))
-            # Check if the point is out of bounds
-            if grid_x < 0 or grid_x >= self.width or grid_y < 0 or grid_y >= self.height:
-                rospy.logwarn(f"Trajectory point ({x:.2f}, {y:.2f}) is out of bounds!")
-                return False  # Out of bounds = assume collision
+    def collision_free(self, q_traj, neighborhood_size=3):
+        """Check if a trajectory is collision-free considering a neighborhood.
+        
+        Args:
+        q_traj: List of (x, y, theta) positions forming a trajectory.
 
-            # Check if the point is an obstacle
-            if self.grid[grid_y, grid_x] >= 80:  # Obstacle threshold
-                rospy.logwarn(f"Trajectory point ({x:.2f}, {y:.2f}) is inside an obstacle!")
+        Returns:
+        True  -> If the trajectory is obstacle-free.
+        False -> If any point in the trajectory is in collision."""
+        for point in q_traj:
+            if self.check_collision(point, neighborhood_size):
                 return False  # Collision detected
+        return True  # Safe trajectory
 
-        return True  # Entire trajectory is collision-free
+    def check_collision(self, config, neighborhood_size=1):
+        """Check if a given configuration collides with an obstacle in the occupancy grid, 
+           considering a neighborhood of `neighborhood_size` cells around the point.
 
+        Args:
+            config (tuple): The (x, y, theta) world coordinates to check.
+            neighborhood_size (int): The half-width of the square neighborhood.
+                                     A value of 3 means checking a 7x7 area (3+1+3).
+        Returns:
+            bool: True if there is a collision in the neighborhood, False otherwise.
+        """
 
-    
+        x, y,_ = config  # Extract position
 
-    #Checks if a given configuration q = (x, y, theta) is inside an obstacle.
-    #Returns:
-    #    True  -> If the position is in collision (inside an obstacle or out of bounds).
-    #    False -> If the position is free.
-#
-    def check_collision(self, q):
-        radius = 2
-        x, y, theta = q  # Extract position
-        grid_x = int((x - self.origin.position.x) / self.resolution)
-        grid_y = int((y - self.origin.position.y) / self.resolution)
+        # Convert world coordinates to grid indices
+        grid_x = round((x - self.origin.position.x) / self.resolution)
+        grid_y = round((y - self.origin.position.y) / self.resolution)
 
-        # Check if the neighborhood is in collision
-        for dx in range(-radius, radius + 1):
-            for dy in range(-radius, radius + 1):
-                new_x = grid_x + dx
-                new_y = grid_y + dy
+        # Check if out of bounds
+        if grid_x < 0 or grid_x >= self.width or grid_y < 0 or grid_y >= self.height:
+            rospy.logwarn(f"Position ({x:.2f}, {y:.2f}) is out of bounds!")
+            return True  # Consider out-of-bounds as a collision
 
-                # Check if the new position is out of bounds
-                if new_x < 0 or new_x >= self.width or new_y < 0 or new_y >= self.height:
-                    return True  # Out of bounds = assume collision
+        # Define the neighborhood search window
+        for i in range(-neighborhood_size, neighborhood_size + 1):
+            for j in range(-neighborhood_size, neighborhood_size + 1):
+                nx = grid_x + i
+                ny = grid_y + j
 
-                # Check if any cell in the neighborhood is occupied (obstacle)
-                if self.grid[new_y, new_x] >= 80:  # Obstacle threshold
-                    return True  # Collision detected
+                # Skip if out of bounds
+                if nx < 0 or nx >= self.width or ny < 0 or ny >= self.height:
+                    continue  # Ignore cells outside the map
 
-        return False  # No obstacles in the neighborhood
+                # Check if the cell is occupied
+                if self.grid[ny, nx] >= 80:  # Threshold for obstacle detection
+                    rospy.logwarn(f"Collision detected at ({x:.2f}, {y:.2f}) in neighborhood!")
+                    return True  # Collision found
 
+        return False  # No collision in the neighborhood
 
-    #def get_goal_pose(self):
-    #    rospy.wait_for_service('/gazebo/get_model_state')
-    #    try:
-    #        get_model_state = rospy.ServiceProxy('/gazebo/get_model_state', GetModelState)
-    #        response = get_model_state("goal_marker", "") 
-    #        if response.success:
-    #            #rospy.loginfo(f"Goal position found at: ({response.pose.position.x:.2f}, {response.pose.position.y:.2f})")
-    #            return (response.pose.position.x, response.pose.position.y, 0.0)
-    #        else:
-    #            rospy.logerr("Goal position not found")
-    #            return None
-    #    except rospy.ServiceException as e:
-    #        rospy.logerr("Service call failed: %s", e)
-    #        return None
+# To get the goal pose from a goal marker
+#    def get_goal_pose(self):
+#        rospy.wait_for_service('/gazebo/get_model_state')
+#        try:
+#            get_model_state = rospy.ServiceProxy('/gazebo/get_model_state', GetModelState)
+#            response = get_model_state("goal_marker", "") 
+#            if response.success:
+#                #rospy.loginfo(f"Goal position found at: ({response.pose.position.x:.2f}, {response.pose.position.y:.2f})")
+#                return (response.pose.position.x, response.pose.position.y, 0.0)
+#            else:
+#                rospy.logerr("Goal position not found")
+#                return None
+#        except rospy.ServiceException as e:
+#            rospy.logerr("Service call failed: %s", e)
+#            return None
 
+# To manually set the goal pose
     def get_goal_pose(self):
-        x = 4.0
-        y = 0.0
-        theta = math.pi/2
-        return x, y, theta
+        x = 8.304 
+        y = 8.4622
+        theta = 0.0
+        return (x, y, theta)
         
     def get_start_pose(self):
         rospy.wait_for_service('/gazebo/get_model_state')
@@ -182,14 +202,6 @@ class Map:
         rospy.logwarn("No nearby free space found! Keeping original start position.")
         return x, y  # If no free space found, return original
 
-
-
-    # Getters so that class RRT can access start and goal pose
-    def get_start(self):
-        return self.start_pose
-    
-    def get_goal(self):
-        return self.goal_pose
     
     """
     Prints the occupancy grid such that:
@@ -200,20 +212,11 @@ class Map:
     """
 
     def print_occupancy_grid(self):
-        print("############################################")
-        print("############################################")
-        print("############################################")
-        print("############################################")
         print("\n\n\n\n\n\n\n\n\n\n\n\n")
         print("Occupancy grid map:")
         for row in reversed(self.grid):
             print(" ".join(map(str, row)))
         print("\n\n\n\n\n\n\n\n\n\n\n\n")
-        print("############################################")
-        print("############################################")
-        print("############################################")
-        print("############################################")
-        
         example_free = None
         example_obstacle = None
         example_unknown = None

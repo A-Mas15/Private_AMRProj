@@ -5,7 +5,7 @@
 
     <!-- Load Gazebo World -->
     <include file="$(find gazebo_ros)/launch/empty_world.launch">
-        <arg name="world_name" default="$(find simple_traj)/world/EmptyWorld/EmptyWorld.world" />
+        <arg name="world_name" default="$(find simple_traj)/world/FinalWorld/FinalWorld1_0.world" />
         <arg name="paused" value="false"/>
         <arg name="use_sim_time" value="true"/>
         <!-- TO modify the physics -->
@@ -16,9 +16,9 @@
     </include>
 
     <!-- ROS Map Server for Occupancy Grid -->
-    <node pkg="map_server" type="map_server" name="map_server" args="$(find simple_traj)/world/EmptyWorld/map.yaml" />
+    <node pkg="map_server" type="map_server" name="map_server" args="$(find simple_traj)/world/FinalWorld/FinalMap.yaml" />
     <!-- Path publisher -->
-    <node name="simple_traj_node" pkg="simple_traj" type="main.py" output="screen"/> 
+    <node name="rrt_planner" pkg="simple_traj" type="main.py" output="screen"/> 
     
 
     <!-- Upload TurtleBot3 URDF -->
