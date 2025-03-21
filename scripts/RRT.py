@@ -1,11 +1,10 @@
-# MODIFIED
 #!/usr/bin/env python3
+import random 
 import math
 import numpy as np
-import random
+
 from unicycle_kinematics import Unicycle
-# MODIFIED
-import matplotlib.pyplot as plt
+
 class ACO:
     """this class implement the Ant Colony Optimization (ACO) algorithm to optimize paths for RRT*, 
     focusing on reducing path length and improving smoothness. 
@@ -66,13 +65,14 @@ class ACO:
         for j in idx_allowed:
             probabilities[j] = (self.pheromone[current][j] ** self.alpha if self.pheromone[current][j] != 0 else 1) * (self.heuristic[j] ** self.beta) 
         probabilities /= probabilities.sum()
+        # for DEBUG
         if np.isnan(probabilities).any():
             next_idx = current+1
             print('next_idx',next_idx)
             q_traj = self.unicycle.plan_trajectory(self.vertices[current], self.vertices[next_idx])['points']
-            print('q_traj', q_traj)                                                 #
-            if not self.map.collision_free(q_traj):                                 #!!!!!!!!CORREGGI PROBLEMI CON ACO!!!!!!!!
-                print('NOT COLLISION FREEE')                                        #
+            print('q_traj', q_traj)                                                 
+            if not self.map.collision_free(q_traj):                                
+                print('NOT COLLISION FREEE')                                        
 
             raise ValueError(f"""Error: probabilities contain NaN values!
             PROBABILITIES IS {probabilities}                                        
@@ -106,7 +106,7 @@ class ACO:
         k=0
         for path, cost_and_angles in zip(paths, path_costs):
             for i in range(len(path) - 1):
-                self.pheromone_deposited[k][path[i]][path[i+1]] = 1 / (cost_and_angles)#[0] + cost_and_angles[1])
+                self.pheromone_deposited[k][path[i]][path[i+1]] = 1 / (cost_and_angles)
             k+=1
         self.pheromone += self.evaporation_ratio * self.pheromone_deposited.sum(axis=0)
 
@@ -143,6 +143,7 @@ class RRTStar():
         map.height: The height of the map.
         map.collision_free(q1,q2): A method of the map returning True if the segment joining q1(tuple:(x,y,theta)) and q2
                                    is collision free, or False otherwise.
+        map.check_collision(v): ....
 
         Main methods:
         -update_tree(join_start): To be executed in a loop. It represents a step in the RRT* algorithm.
@@ -158,10 +159,10 @@ class RRTStar():
                                  Pareto optimal startegy with objectives next node length (distance from current node + next node cost) and steering angle.
         
         """
-    # MODIFIED
-    MAX_ITER = 2000                # fixed max number of iterations that the algorithm does
+    
+    MAX_ITER = 500                # fixed max number of iterations that the algorithm does
     DELTA = 0.65                  # DELTA in [0,1]: distance of x_new generation starting from x_near
-    DIS = 300                     # Euclidean distance used in NeighborNodes
+    DIS = 300                     # distance used in NeighborNodes
                                   # |-> Augmenting this hyperparameter will slow the algorithm because it has to check for an higher number of neighbors
 
     def __init__(self, map): 
@@ -172,29 +173,37 @@ class RRTStar():
         self.parent = None
         self.cost = []
 
-        #set the map
+        # set the map
         self.map = map                           # theta is taken as the orientation w.r.t to the x axis (CounterClockwise)
-        # MODIFIED
-        self.start = map.get_start()                   # start config. of the robot: q=(x,y,theta)
-        self.goal = map.get_goal()                     # goal config. of the robot: q=(x,y,theta)
-
-        
+        self.start = map.start                   # start config. of the robot: q=(x,y,theta)
+        self.goal = map.goal                     # goal config. of the robot: q=(x,y,theta)
         self.map_width = map.width
         self.map_height = map.height
+        print(f"Map Size FROM RRT: Width={self.map_width}, Height={self.map_height}")
 
-        #insert the goal 
-        self.vertices.append(self.start)         # decide the direction of expansion of the tree
+
+        # insert the goal 
+        self.vertices.append(self.goal)         # decide the direction of expansion of the tree
         self.cost.append(0)
 
-        #initialize best path
+        # initialize best path
         self.best_path = []
         self.best_vertices = []
+
+        # used in replanning
+        self.x_prev = []
 
     def rand_sample(self):
         """this method generate a random sample with uniform probability distribution in the map"""
         x = random.randint(0, self.map_width-1)
         y = random.randint(0, self.map_height-1)
         theta = random.uniform(-math.pi/2, math.pi/2)
+        # Modified Debugging print
+        print(f"📐 Map dims: width={self.map_width}, height={self.map_height}")
+        if not (0 <= x < self.map_width and 0 <= y < self.map_height):
+            print(f"Sampled q_rand OUT OF BOUNDS: ({x}, {y}, {theta})")
+        else:
+            print(f"Sampled q_rand: ({x}, {y}, {theta}) is within bounds.")
         return (x, y, theta)
 
     def compute_q_near(self, q_rand):
@@ -222,12 +231,40 @@ class RRTStar():
             math.sqrt((control_point_x1 - control_point_x2) ** 2 + (control_point_y1 - control_point_y2) ** 2)
         return distance
     
-    def steer(self, q_near, q_rand):
-        """this method returns x_new as the configuration in the direction starting from x_near to x_rand scaled by DELTA""" 
-        direction = ((q_rand[0] - q_near[0]), (q_rand[1] - q_near[1]))
-        q_steering = (q_near[0] + direction[0] * self.DELTA, q_near[1] + direction[1] * self.DELTA, q_rand[2])
-        return q_steering
+    #def steer(self, q_near, q_rand):
+    #    """this method returns x_new as the configuration in the direction starting from x_near to x_rand scaled by DELTA""" 
+    #    direction = ((q_rand[0] - q_near[0]), (q_rand[1] - q_near[1]))
+    #    q_steering = (q_near[0] + direction[0] * self.DELTA, q_near[1] + direction[1] * self.DELTA, q_rand[2])
+    #    return q_steering
     
+    # MODIFIED
+    def steer(self, q_near, q_rand):
+        dx = q_rand[0] - q_near[0]
+        dy = q_rand[1] - q_near[1]
+        distance = math.hypot(dx, dy)
+
+        if distance == 0:
+            return q_near  # no movement
+
+        scale = min(self.DELTA, distance) / distance  # ensures we never overshoot
+        x_new = q_near[0] + dx * scale
+        y_new = q_near[1] + dy * scale
+        theta_new = q_rand[2]  # or compute angle toward goal if needed
+
+        # Optional: clamp to map bounds
+        x_new = max(0, min(x_new, self.map_width - 1))
+        y_new = max(0, min(y_new, self.map_height - 1))
+
+                # Modified Debugging print
+
+        if not (0 <= x_new < self.map_width and 0 <= y_new < self.map_height):
+            print(f"Steered q_new OUT OF BOUNDS: ({x_new}, {y_new}, {theta_new})")
+        else:
+            print(f"Steered q_new: ({x_new}, {y_new}, {theta_new}) is within bounds.")
+
+        return (x_new, y_new, theta_new)
+
+    #END
     def compute_q_new(self, join_q = None):
         """this method consists in the forward step of the algorithm:
         -generates a random config.
@@ -239,16 +276,16 @@ class RRTStar():
             q_rand = join_q
         q_nearest = self.compute_q_near(q_rand)
         q_new = self.steer(q_nearest, q_rand)
+        # Modified Debugging print
+        print("\n🧪 Sampled Config:")
+        print(f"q_rand:     ({q_rand[0]:.2f}, {q_rand[1]:.2f}, {q_rand[2]:.2f})")
+        print(f"q_nearest:  ({q_nearest[0]:.2f}, {q_nearest[1]:.2f}, {q_nearest[2]:.2f})")
+        print(f"q_new:      ({q_new[0]:.2f}, {q_new[1]:.2f}, {q_new[2]:.2f})")
         return q_new, q_nearest
     
     def compute_cost(self, q1, q_traj):
         """return the cost of q_2 starting from q1 and following the trajectory q_traj"""
         index = self.vertices.index(q1)
-        # cost = self.cost[index]
-        # q_prev = q_traj[0]
-        # for q in q_traj[1:]:
-        #     cost += math.sqrt((q_prev[0]-q[0]) ** 2 + (q_prev[1]-q[1]) ** 2)
-        #     q_prev = q
         cost = self.cost[index] + self.unicycle.get_arc_length(q_traj)
         return cost
 
@@ -261,20 +298,25 @@ class RRTStar():
                 X.append(x)
         return X
 
-    def update_tree(self, join_goal = False):
+    def update_tree(self, join_start = False):
         """this method represent execute the path_generation function in the RRT* algorithm """
-        if join_goal:
-            q_new = self.goal
+        if join_start:
+            q_new = self.start
             q_nearest = self.compute_q_near(q_new)
         else:
             q_new,q_nearest = self.compute_q_new()
 
-        q_traj = self.unicycle.plan_trajectory(q_nearest, q_new)['points']
+        q_traj = self.unicycle.plan_trajectory(q_new, q_nearest)['points']
         
         if not self.map.collision_free(q_traj):
             #print('collision detected, remove current q_new')
-            if join_goal:
+            # Modified Debugging print
+            print("🚫 q_new trajectory in collision")
+            print(f"📌 Map width/height: {self.map_width}, {self.map_height}")
+            print(f"📍 q_new: {q_new}")
+            if join_start:
                 return 'No path exist'
+            
             return 'continue'
         self.parent = q_nearest                                             # set q_nearest as parent
 
@@ -288,20 +330,35 @@ class RRTStar():
         
         self.vertices.append(q_new)                                         # add q_new to the vertices list
         if self.parent != q_nearest:
-            q_traj = self.unicycle.plan_trajectory(self.parent, q_new)['points']
+            q_traj = self.unicycle.plan_trajectory(q_new, self.parent)['points']
         self.edges.append(q_traj)                                           # add the edge connecting the best parent with q_new
 
         # Used for checking if q_new can be the best parent for its q_near
         for q_near in Q_near:                                               # rewire the neighborhood of q_new for replacing the parent of q_near with q_new if this reduce the cost of q_near 
-            x_parenttemp, q_traj_q_new_q_near = self.rewire(q_new, q_near, parenttemp=True) # inverted order for q_new, q_near
+            x_parenttemp, q_traj_q_near_q_new = self.rewire(q_new, q_near, parenttemp=True) # inverted order for q_new, q_near
             if x_parenttemp == q_new:
                 self.remove_old_edge_of_q_near(q_near)
-                self.edges.append(q_traj_q_new_q_near)
+                self.edges.append(q_traj_q_near_q_new)
+
+        # Modified Debugging print
+        self.valid_samples = 0
+        self.invalid_samples = 0
+        if 0 <= q_new[0] < self.map_width and 0 <= q_new[1] < self.map_height:
+            self.valid_samples += 1
+        else:
+            self.invalid_samples += 1
+
+        total_samples = self.valid_samples + self.invalid_samples
+        if total_samples % 10 == 0:  # Print every 10 iterations
+            valid_pct = (self.valid_samples / total_samples) * 100
+            print(f"📊 Valid Samples: {self.valid_samples} / {total_samples} ({valid_pct:.1f}%)")
+
+
 
 
     def rewire(self, q1, q2, cost_q2=None, parenttemp=False):
         """this method rewire q2 with q1 if this reduce the cost of q2"""
-        q_traj_q1_q2 = self.unicycle.plan_trajectory(q1, q2)['points']
+        q_traj_q1_q2 = self.unicycle.plan_trajectory(q2, q1)['points']
         if self.map.collision_free(q_traj_q1_q2):
             new_cost_q2 = self.compute_cost(q1, q_traj_q1_q2)
             index = -1                                              # last index of the self.cost list
@@ -314,149 +371,236 @@ class RRTStar():
                 if parenttemp:
                     return q1, q_traj_q1_q2
                 self.parent = q1
+
         return None,None
 
     def remove_old_edge_of_q_near(self, q_near):
-        """Remove the element which contains q_near as the last value in the edges list (child)."""
-        for edge in self.edges:
-            if (round(edge[-1][0],2) == round(q_near[0],2)) and (round(edge[-1][1],2) == round(q_near[1],2)):  
+        """Remove the element which contains q_near as the first value in the edges list (child)."""
+        for edge in self.edges[:]:
+            if edge[0] == q_near: 
                 self.edges.remove(edge)  
                 break
-
+    
     def output_best_path(self):
         """this method compute the best_path from the start to the goal"""
-        done= False
-        self.child = self.goal[:-1] 
-        i=0
-        while not done:
-            #print('child', self.child)
-            for edge in self.edges:
-                #print('edge', edge[-1])
-                if (round(edge[-1][0],2) == round(self.child[0],2)) and (round(edge[-1][1],2) == round(self.child[1],2)):  # edge[-1] == self.child:  
-                    #self.best_vertices.append([edge[-1],edge[0]])        # append edges from start to goal
-                    self.best_path.append(edge)
-                    self.child = edge[0]
-                    break
-            if self.child == self.start[:-1]:
-                done = True
-            i+=1
-            if i==1000:                                             # break the cycle to prevent infinite loop
-                print('escape the cycle... something went wrong...') 
-                break
+        # Modidied
+        if not self.best_path:
+            print("❌ No valid path found! Cannot output best path.")
+            return  # Exit early
 
-        self.best_path = self.best_path[::-1]
+        edge = None  # Initialize edge before using it
+
+        # Find the edge that reaches the goal
+        for e in self.best_path:
+            if e[-1] == self.goal:
+                edge = e
+                break  # Stop once we reach the goal
+        else:
+            print("❌ Goal not found in best path!")
+            return  # Exit early
+
+        # Ensure edge is assigned
+        if edge is None:
+            print("❌ Error: 'edge' is still None after iteration.")
+            return
+
+        print("Best path successfully generated.")
+
+        # End
+        
+        done= False
+        self.child = self.start 
+ 
+        while not done:
+            flag = False
+            for edge in self.edges:
+                if edge[0] == self.child:  
+                    self.best_path.append(edge)
+                    print(f"Best path updated: {self.best_path}")
+                    self.child = edge[-1]
+                    flag = True
+                    break
+            if edge[-1] == self.goal:
+                done = True
+
+            # FOR DEBUGGING
+            if flag == False:
+                print(f'current: {round(self.child[0],0)}, {round(self.child[1],0)}' )
+                for edge in self.edges:
+                    print(f'{round(edge[-1][0],0)}, {round(edge[-1][1],0)}')
+                raise ValueError('escape the cycle... something went wrong...')
+
         # Ant Colony Optimization
-        #self.aco_optimization()
+        self.aco_optimization()
 
     def aco_optimization(self):
         """optimize the best_path using ACO. 
         It must be called after computing the best_path with output_best_path method"""
         aco = ACO(self.map, self.best_path, self.get_vertices_from_best_path(), self.unicycle)
         self.best_path = aco.optimize()
+        self.best_vertices = self.get_vertices_from_best_path()
 
     def get_vertices_from_best_path(self):
+        """Returns the vertices of the best path"""
         vertices = [self.start]
         for path in self.best_path:
-            for vertex in self.vertices:
-                if (round(vertex[0],2) == round(path[-1][0],2)) and (round(vertex[1],2) == round(path[-1][1],2)):
-                    vertices.append(vertex)
-        print('vertices', vertices)
+            vertices.append(path[-1])
         return vertices
-            
-    def path_replanning(self, x_current):
+
+    def replan_path(self, x_current, next_path_node):
         """This is the main method for MOD-RRT*
-        Execute the dynamic replanning of the path in a loop until it reaches the goal.
+        Execute the dynamic replanning of the path in order to find the next collisionfree edge where to move.
         the optimization is based on minimizing the objectives of next node length and steering angle using the Pareto dominance method."""
-        count = 0
-        x_prev=[x_current]
-        self.replanned_best_path = []
-        self.sample_best_path()                                 # this is required to discretize the best path
-        while x_current != self.goal:
+        self.x_prev.append(x_current)
+        X_candi = []
+        X_near = self.NeighborNodes(x_current, dist=300)
+        for x_near in X_near:
+            if x_near in self.x_prev: continue
+            q_traj, _, smoothness_cost = self.unicycle.get_path_length_and_smoothness(x_current, x_near, return_q_traj= True)
+            if self.map.collision_free(q_traj):
+                # Compute length
+                length = self.compute_cost(x_near, q_traj)
+                # Compute deviation angle from optimal trajectory
+                alpha = math.atan2(next_path_node[1]-x_current[1], next_path_node[0]-x_current[0])
+                beta = math.atan2(x_near[1]-x_current[1], x_near[0]-x_current[0])
+                theta = abs(beta-alpha) #+ smoothness_cost
 
-            next_path_node = self.compute_next_path_node(x_current, count)
+                X_candi.append((x_near, length, theta))
 
-            if self.find_obstacle(x_current, next_path_node):
-                x_current = self.get_current_position(x_current)
+        if not X_candi: raise ValueError("No neighbor candidates were found. Consider increasing the number of iterations.")
+        x_next = self.Pareto(X_candi)
+        #print('x_next PARETO:',x_next)
 
-                X_candi = []
-                X_near = self.NeighborNodes(x_current, dist=50)
-                for x_near in X_near:
-                    if x_near in x_prev: continue
-                    if self.map.collision_free(x_current, x_near):
-                        # Compute length
-                        length = self.compute_cost(x_near, x_current)
-                        # compute angle theta
-                        alpha = math.atan2(next_path_node[1]-x_current[1], next_path_node[0]-x_current[0])
-                        beta = math.atan2(x_near[1]-x_current[1], x_near[0]-x_current[0])
-                        theta = abs(beta-alpha)
-                        theta = math.degrees(theta)
+        next_edge = self.unicycle.plan_trajectory(x_current, x_next)['points']
+        return next_edge, x_next
 
-                        X_candi.append((x_near, length, theta))
+    def compute_next_path_node(self, x_current, executed_path):
+        """This method returns the next node of the pre-computed path from x_current"""
 
-                if not X_candi: raise ValueError("No neighbor candidates were found. Consider increasing the number of iterations.")
-                x_next = self.Pareto(X_candi)
+        direct_path_to_goal = self.unicycle.plan_trajectory(x_current, self.goal)['points']
+        if self.map.collision_free(direct_path_to_goal):
+            return direct_path_to_goal, self.goal
 
-            # normal execution if doesn't find the obstacle
+        latest_index = -1
+
+        for item in executed_path:
+            if item in self.best_vertices:
+                latest_index = self.best_vertices.index(item)
+
+        next_path_node = self.best_vertices[latest_index + 1] if latest_index + 1 < len(self.best_vertices) else None
+
+        if next_path_node == None:
+            raise ValueError('index out of bounds') 
+        
+        while self.map.check_collision(next_path_node):
+            if latest_index < len(self.best_vertices) -1:
+                latest_index+=1
+                next_path_node = self.best_vertices[latest_index + 1]
             else:
-                x_next = next_path_node
-
-            count +=1
-            # print('x_next:',x_next)
-            self.replanned_best_path.append((x_current,x_next))
-            x_current = x_next
-            x_prev.append(x_current)
-
-    def compute_next_path_node(self, x_current, idx):
-        """This method returns the nearest next node of the pre-computed path to x_current"""
-        min_distance =100000
-        next_pathe_node = self.best_path[-1][1]
-        for edge in self.best_path[idx:]:
-            distance = self.compute_distance(x_current,edge[1])
-            if  distance < min_distance:
-                min_distance = distance 
-                next_pathe_node = edge[1]
-        return next_pathe_node
-    
-    def sample_best_path(self, render = False):
-        """This method is used to discretize the best path and compute internal nodes cost.
-            Is possible to visualize the discretized points if setting render to True. """
-        x_current = self.best_path[-1][-1]
-        count=-1
-        path = []
-        while x_current != self.start:
-            next_best_path = self.best_path[count][0]
-            distance = math.sqrt( (x_current[0] - next_best_path[0]) ** 2 + (x_current[1] - next_best_path[1]) ** 2)  
-
-            if distance > 20:
-                direction = ((next_best_path[0] - x_current[0])/ distance, (next_best_path[1] - x_current[1])/distance)
-                next_path_node = (x_current[0] + (direction[0] * 20), x_current[1] + (direction[1] * 20))
-
-                if render:
-                    self.map.add_point(next_path_node, color=(0,255,255))
-                    self.map.draw()
-                 
-                cost = self.compute_cost(x_current , next_path_node)
-                self.vertices.append(next_path_node)
-                self.cost.append(cost)
-            else:
-                next_path_node = next_best_path
-                count-=1
-
-            path.insert(0, [next_path_node, x_current])
-            x_current = next_path_node
-        self.best_path = path
-
+                raise ValueError('Goal is in collision')
+            
+        next_edge = self.unicycle.plan_trajectory(x_current, next_path_node)['points']
+        return next_edge, next_path_node
+        
     def find_obstacle(self, x_current, x_next):
-        """Should be a laser scan reading, we need a conic area to exclude the nodes within it.
-        This represents a simplified version."""
-        if not self.map.collision_free(x_current, x_next):
+        """OLD VERSION:Should be a laser scan reading, we need a conic area to exclude the nodes within it.
+        This represents a simplified version.
+        FOR THE NEW VERSION CHECK IN THE MAIN.PY"""
+        q_traj = self.unicycle.plan_trajectory(x_current, x_next)['points']
+        # assuming to have knowledge of all the map (if you have a laser scanner you have to change this!)
+        if not self.map.collision_free(q_traj):
             return True
-        else: 
+        else:
             return False
 
-    def get_current_position(self, x_current):
-        """implement a localization method"""
-        return x_current
+    def update_tree_structure(self):
+        # Remove nodes in collision
+        for v in self.vertices[:]:
+            if self.map.check_collision(v):
+                idx = self.vertices.index(v)
+                # remove nodes in collision
+                self.vertices.pop(idx)
+                self.cost.pop(idx)
+         
+        # Remove edges in collision
+        orphans = []
+        for edge in self.edges[:]:
+            if not self.map.collision_free(edge):
+                orphan = edge[0]
+                if orphan in self.vertices:
+                    idx = self.vertices.index(orphan)                     
+                    self.cost[idx] = 10000000                           # need to reassign the cost of the orphan node before rewire
+                    orphans.append(orphan)
+
+                self.edges.remove(edge)
+
+        # REWIRE ORPHAN NODES
+        # remove from Q_near the children of orph
+        Q_children = self.get_children_of_orph(orphans)
+
+        # rewire the orphans
+        self.rewire_orphan_node(orphans, Q_children, reconnection_range = self.DIS)
+
+        # rewire their nodes
+        self.rewire_orphan_node(Q_children, [], reconnection_range = self.DIS)
+
+
+    def rewire_orphan_node(self, orphans, Q_children, reconnection_range):
+        rewired_nodes = []
+
+        for orph in orphans:
+            Q_near = self.NeighborNodes(orph, reconnection_range)
+
+            to_remove = list(set(orphans) - set(rewired_nodes))
+            Q_cands = list(set(Q_near) - set(Q_children)- set(to_remove))
+
+            for q_near in Q_cands:
+                parent,q_traj = self.rewire(q_near, orph, parenttemp=True)
+                if parent == q_near:
+                    self.remove_old_edge_of_q_near(orph)   
+                    self.edges.append(q_traj)
+            
+            # Error management
+            idx = self.vertices.index(orph)                     
+            if self.cost[idx]==10000000: 
+                """this happens if was not possible to do the rewire on orph because of small neighborhood 
+                or all connections with orph are in collision.
+                In this case:
+                - romove orph from the vertices and the connections with it"""
+
+                for edge in self.edges[:]:
+                    if edge[-1] == orph:
+                        self.edges.remove(edge)
+                
+                idx = self.vertices.index(orph)
+                self.vertices.pop(idx)
+                self.cost.pop(idx)
+
+            else:
+                rewired_nodes.append(orph)
+    
+    def get_children_of_orph(self, orphans):
+        """This method returns the all the children of the orphans list selected.
+        Moreover replace the old cost of each child of the orphan with a default high cost (e.g., 10000000)"""
+        Q_children = []  
+        Q_edges = []
+        for orph in orphans:
+            queue = [orph]  
+
+            while queue:
+                parent = queue.pop(0)  
+                for edge in self.edges:
+                    if edge[-1] == parent: 
+                        child = edge[0]
+                        if child not in Q_children:  
+                            idx = self.vertices.index(child)                     
+                            self.cost[idx] = 10000000
+                            Q_children.append(child)
+                            queue.append(child)  
+                            Q_edges.append(edge)
+                            
+                            if child not in self.vertices: raise ValueError('IMPOSSIBLE ERROR')
+        return Q_children
 
     def Pareto(self, X_candi):
         """This method implement the Pareto dominance function to be used in the path_replanning method."""
@@ -491,33 +635,3 @@ class RRTStar():
             return x_rand
 
         return X_candi[indices_with_max_outdegree[0]][0]
-    
-    # MODIFIED
-    def visualize_rrt(rrt_nodes, edges, path=None, obstacles=None):
-        plt.figure(figsize=(10, 5))
-
-        # Plot obstacles if available
-        if obstacles is not None:
-            plt.imshow(obstacles, cmap='gray', origin='lower', extent=[0, 10, 0, 10])
-
-        # Plot the sampled points (nodes)
-        for node in rrt_nodes:
-            plt.scatter(node[0], node[1], color='blue', s=5)  # Small blue dots
-
-        # Plot the edges (connections)
-        for edge in edges:
-            plt.plot([edge[0][0], edge[1][0]], [edge[0][1], edge[1][1]], color='gray', linewidth=0.5)
-
-        # Plot the final path in red
-        if path:
-            for i in range(len(path) - 1):
-                plt.plot([path[i][0], path[i+1][0]], [path[i][1], path[i+1][1]], color='red', linewidth=2)
-
-        plt.xlabel("X (meters)")
-        plt.ylabel("Y (meters)")
-        plt.title("RRT* Path Planning")
-        plt.grid(True)
-        plt.show()
-
-    
-    

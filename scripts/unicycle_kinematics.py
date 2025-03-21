@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
+import math 
 import numpy as np
-import math
 
 class Unicycle():
     """this class is used to plan a trajectory between two configurations of the unicycle 
         exploiting the differential flatness property"""
     
     def __init__(self):
-        self.parameters = {'smoothness': 100,
+        self.parameters = {'smoothness': 50,
                            'trajectory_time': 1,
                            'trajectory_sampling_step': 0.005}
         self.dt =self.parameters['trajectory_sampling_step']
@@ -54,44 +54,29 @@ class Unicycle():
             dx_t = dx * 1/T
             dy_t = dy * 1/T
 
-            ddx = 6*s * x_fin - 6*(s-1) * x_in + 2 * alpha_x *(3*s - 1)+ 2 * beta_x *(3*s - 2)
-            ddy = 6*s * y_fin - 6*(s-1) * y_in + 2 * alpha_y *(3*s - 1)+ 2 * beta_y *(3*s - 2)
+            # ddx = 6*s * x_fin - 6*(s-1) * x_in + 2 * alpha_x *(3*s - 1)+ 2 * beta_x *(3*s - 2)
+            # ddy = 6*s * y_fin - 6*(s-1) * y_in + 2 * alpha_y *(3*s - 1)+ 2 * beta_y *(3*s - 2)
 
-            ddx_t = ddx * 1/(T ** 2)
-            ddy_t = ddy * 1/(T ** 2)
+            # ddx_t = ddx * 1/(T ** 2)
+            # ddy_t = ddy * 1/(T ** 2)
 
-            # Recontstruction Formulas
+            # # Recontstruction Formulas
             theta = math.atan2(dy_t,dx_t)
-            v_t = math.sqrt(dx_t **2 + dy_t**2) 
-            w_t = (ddy_t * dx_t - dy_t * ddx_t)/(dx_t**2 + dy_t**2) 
+            # v_t = math.sqrt(dx_t **2 + dy_t**2) 
+            # w_t = (ddy_t * dx_t - dy_t * ddx_t)/(dx_t**2 + dy_t**2) 
     
-            t += self.dt
-            trajectory['inputs'].append([v_t,w_t])
-            trajectory['points'].append((x_t,y_t))
+            if t==0:
+                x_t, y_t, theta = x_in, y_in, theta_in
+            if round(t,3) == T:
+                x_t, y_t, theta = x_fin, y_fin, theta_fin
 
-            #update cost
-            #trajectory['cost'] = trajectory['cost'] + v_t * self.dt
+            t += self.dt
+            #trajectory['inputs'].append([v_t,w_t])
+            trajectory['points'].append((x_t,y_t, theta))
 
         return trajectory
-        # prova
-        t=0
-        i=0
-        q_traj = []
-        x, y, theta = q_in
-        while t< T:
-            v, omega = primitive['inputs'][i]
-            # Euler integration
-            x = x + v * self.dt * math.cos(theta)
-            y = y + v * self.dt * math.sin(theta)
-            theta = theta + omega * self.dt
-    
-            t += self.dt
-            i+=1
-            q_traj.append((x,y))
-
-        return q_traj
-
-    def get_path_length_and_smoothness(self, v1, v2):
+        
+    def get_path_length_and_smoothness(self, v1, v2, return_q_traj = False):
         x_in = v1[0]
         y_in = v1[1] 
         theta_in = v1[2] 
@@ -102,6 +87,9 @@ class Unicycle():
 
         t=0
         T = self.parameters['trajectory_time']
+
+        if return_q_traj:
+            q_traj =[]
 
         cost = 0
         smooth = 0
@@ -122,6 +110,10 @@ class Unicycle():
             beta_y = k * math.sin(theta_in) + 3 * y_in
             
             # Cubic polynomials
+            if return_q_traj:
+                x_t = s**3 * x_fin - (s-1)**3 * x_in + alpha_x * s**2*(s-1) + beta_x * s *(s-1)**2
+                y_t = s**3 * y_fin - (s-1)**3 * y_in + alpha_y * s**2*(s-1) + beta_y * s *(s-1)**2
+
             dx = 3*s**2 * x_fin - 3*(s-1)**2 * x_in + alpha_x * s *(3*s - 2)+ beta_x *(3*s**2 - 4*s +1)
             dy = 3*s**2 * y_fin - 3*(s-1)**2 * y_in + alpha_y * s *(3*s - 2)+ beta_y *(3*s**2 - 4*s +1)
 
@@ -131,6 +123,9 @@ class Unicycle():
             # Recontstruction Formulas
             theta = math.atan2(dy_t,dx_t)
             v_t = math.sqrt(dx_t **2 + dy_t**2) 
+
+            if return_q_traj:
+                q_traj.append((x_t,y_t))
     
             t += self.dt
 
@@ -139,10 +134,12 @@ class Unicycle():
             smooth = smooth + abs(theta - theta_prev) 
             theta_prev = theta
 
+        if return_q_traj:
+            return q_traj, cost, smooth
+        
         return cost, smooth
 
-
-    def get_arc_length(self, q_traj):
+    def get_arc_length(self, q_traj):        
         """return arclength following q_traj"""
         L=0
         q_prev = q_traj[0]
