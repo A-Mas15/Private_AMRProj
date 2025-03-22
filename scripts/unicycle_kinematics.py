@@ -2,14 +2,24 @@
 import math 
 import numpy as np
 
+# Configurations in meters
+
 class Unicycle():
     """this class is used to plan a trajectory between two configurations of the unicycle 
         exploiting the differential flatness property"""
-    
-    def __init__(self):
-        self.parameters = {'smoothness': 50,
-                           'trajectory_time': 1,
+    """
+        self.parameters = {'smoothness': 1,
+
+
+                           'trajectory_time': 0.5,
+
+
                            'trajectory_sampling_step': 0.005}
+    """
+    def __init__(self):
+        self.parameters = {'smoothness': 1,
+                           'trajectory_time': 0.5,
+                           'trajectory_sampling_step': 0.05}
         self.dt =self.parameters['trajectory_sampling_step']
     
     def plan_trajectory(self, q_in, q_fin, map_width = None, map_height = None):
@@ -173,4 +183,3 @@ if __name__ == '__main__':
     #print('Q left', Q[0])
     # print('Q center', Q[1])
     # print('Q right', Q[2])
-

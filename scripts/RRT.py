@@ -68,9 +68,9 @@ class ACO:
         # for DEBUG
         if np.isnan(probabilities).any():
             next_idx = current+1
-            print('next_idx',next_idx)
+            #print('next_idx',next_idx)
             q_traj = self.unicycle.plan_trajectory(self.vertices[current], self.vertices[next_idx])['points']
-            print('q_traj', q_traj)                                                 
+            #print('q_traj', q_traj)                                                 
             if not self.map.collision_free(q_traj):                                
                 print('NOT COLLISION FREEE')                                        
 
@@ -95,7 +95,6 @@ class ACO:
         for i in range(len(path) - 1):
             v1 = self.vertices[path[i]]
             v2 = self.vertices[path[i+1]]
-
             cost, smooth  = self.unicycle.get_path_length_and_smoothness(v1, v2)
         return cost + smooth
        
@@ -160,7 +159,7 @@ class RRTStar():
         
         """
     
-    MAX_ITER = 500                # fixed max number of iterations that the algorithm does
+    MAX_ITER = 50                # fixed max number of iterations that the algorithm does
     DELTA = 0.65                  # DELTA in [0,1]: distance of x_new generation starting from x_near
     DIS = 300                     # distance used in NeighborNodes
                                   # |-> Augmenting this hyperparameter will slow the algorithm because it has to check for an higher number of neighbors
@@ -179,7 +178,7 @@ class RRTStar():
         self.goal = map.goal                     # goal config. of the robot: q=(x,y,theta)
         self.map_width = map.width
         self.map_height = map.height
-        print(f"Map Size FROM RRT: Width={self.map_width}, Height={self.map_height}")
+        print(f"Map Size FROM RRT: Width={self.map_width}, Height={self.map_height}")   #VA CORRETTO PERCHE RRT PRENDE LA MAPPA ORIGINALE NON COCCUPANCY_GRID
 
 
         # insert the goal 
@@ -195,15 +194,9 @@ class RRTStar():
 
     def rand_sample(self):
         """this method generate a random sample with uniform probability distribution in the map"""
-        x = random.randint(0, self.map_width-1)
-        y = random.randint(0, self.map_height-1)
+        x = random.uniform(0, self.map_width * self.map.resolution)  # Works in meters and not cell
+        y = random.uniform(0, self.map_height * self.map.resolution)
         theta = random.uniform(-math.pi/2, math.pi/2)
-        # Modified Debugging print
-        print(f"📐 Map dims: width={self.map_width}, height={self.map_height}")
-        if not (0 <= x < self.map_width and 0 <= y < self.map_height):
-            print(f"Sampled q_rand OUT OF BOUNDS: ({x}, {y}, {theta})")
-        else:
-            print(f"Sampled q_rand: ({x}, {y}, {theta}) is within bounds.")
         return (x, y, theta)
 
     def compute_q_near(self, q_rand):
@@ -231,40 +224,12 @@ class RRTStar():
             math.sqrt((control_point_x1 - control_point_x2) ** 2 + (control_point_y1 - control_point_y2) ** 2)
         return distance
     
-    #def steer(self, q_near, q_rand):
-    #    """this method returns x_new as the configuration in the direction starting from x_near to x_rand scaled by DELTA""" 
-    #    direction = ((q_rand[0] - q_near[0]), (q_rand[1] - q_near[1]))
-    #    q_steering = (q_near[0] + direction[0] * self.DELTA, q_near[1] + direction[1] * self.DELTA, q_rand[2])
-    #    return q_steering
-    
-    # MODIFIED
     def steer(self, q_near, q_rand):
-        dx = q_rand[0] - q_near[0]
-        dy = q_rand[1] - q_near[1]
-        distance = math.hypot(dx, dy)
+        """this method returns x_new as the configuration in the direction starting from x_near to x_rand scaled by DELTA""" 
+        direction = ((q_rand[0] - q_near[0]), (q_rand[1] - q_near[1]))
+        q_steering = (q_near[0] + direction[0] * self.DELTA, q_near[1] + direction[1] * self.DELTA, q_rand[2])
+        return q_steering
 
-        if distance == 0:
-            return q_near  # no movement
-
-        scale = min(self.DELTA, distance) / distance  # ensures we never overshoot
-        x_new = q_near[0] + dx * scale
-        y_new = q_near[1] + dy * scale
-        theta_new = q_rand[2]  # or compute angle toward goal if needed
-
-        # Optional: clamp to map bounds
-        x_new = max(0, min(x_new, self.map_width - 1))
-        y_new = max(0, min(y_new, self.map_height - 1))
-
-                # Modified Debugging print
-
-        if not (0 <= x_new < self.map_width and 0 <= y_new < self.map_height):
-            print(f"Steered q_new OUT OF BOUNDS: ({x_new}, {y_new}, {theta_new})")
-        else:
-            print(f"Steered q_new: ({x_new}, {y_new}, {theta_new}) is within bounds.")
-
-        return (x_new, y_new, theta_new)
-
-    #END
     def compute_q_new(self, join_q = None):
         """this method consists in the forward step of the algorithm:
         -generates a random config.
@@ -276,11 +241,8 @@ class RRTStar():
             q_rand = join_q
         q_nearest = self.compute_q_near(q_rand)
         q_new = self.steer(q_nearest, q_rand)
-        # Modified Debugging print
-        print("\n🧪 Sampled Config:")
-        print(f"q_rand:     ({q_rand[0]:.2f}, {q_rand[1]:.2f}, {q_rand[2]:.2f})")
-        print(f"q_nearest:  ({q_nearest[0]:.2f}, {q_nearest[1]:.2f}, {q_nearest[2]:.2f})")
-        print(f"q_new:      ({q_new[0]:.2f}, {q_new[1]:.2f}, {q_new[2]:.2f})")
+        print('Q_NEW', q_new)
+
         return q_new, q_nearest
     
     def compute_cost(self, q1, q_traj):
@@ -307,13 +269,14 @@ class RRTStar():
             q_new,q_nearest = self.compute_q_new()
 
         q_traj = self.unicycle.plan_trajectory(q_new, q_nearest)['points']
+
+        # collision_free expects cells
+        # q_traj_cells = [(self.map.world_to_map(q[0], q[1])[0], 
+        #          self.map.world_to_map(q[0], q[1])[1], q[2]) 
+        #          for q in q_traj]
         
         if not self.map.collision_free(q_traj):
             #print('collision detected, remove current q_new')
-            # Modified Debugging print
-            print("🚫 q_new trajectory in collision")
-            print(f"📌 Map width/height: {self.map_width}, {self.map_height}")
-            print(f"📍 q_new: {q_new}")
             if join_start:
                 return 'No path exist'
             
@@ -341,17 +304,20 @@ class RRTStar():
                 self.edges.append(q_traj_q_near_q_new)
 
         # Modified Debugging print
-        self.valid_samples = 0
-        self.invalid_samples = 0
-        if 0 <= q_new[0] < self.map_width and 0 <= q_new[1] < self.map_height:
-            self.valid_samples += 1
-        else:
-            self.invalid_samples += 1
+        # self.valid_samples = 0
+        # self.invalid_samples = 0
+        # if 0 <= q_new[0] < self.map_width and 0 <= q_new[1] < self.map_height:
+        #     self.valid_samples += 1
+        # else:
+        #     self.invalid_samples += 1
 
-        total_samples = self.valid_samples + self.invalid_samples
-        if total_samples % 10 == 0:  # Print every 10 iterations
-            valid_pct = (self.valid_samples / total_samples) * 100
-            print(f"📊 Valid Samples: {self.valid_samples} / {total_samples} ({valid_pct:.1f}%)")
+        # total_samples = self.valid_samples + self.invalid_samples
+        # if total_samples % 10 == 0:  # Print every 10 iterations
+        #     valid_pct = (self.valid_samples / total_samples) * 100
+        # print(f"📊 Valid Samples: {self.valid_samples} / {total_samples}")
+        # print(f"📊 INValidO Samples: {self.invalid_samples}")
+
+        print('printo sti cazzo de punti ', len(self.vertices))
 
 
 
@@ -383,28 +349,23 @@ class RRTStar():
     
     def output_best_path(self):
         """this method compute the best_path from the start to the goal"""
-        # Modidied
-        if not self.best_path:
-            print("❌ No valid path found! Cannot output best path.")
-            return  # Exit early
-
-        edge = None  # Initialize edge before using it
+        # edge = None  # Initialize edge before using it
 
         # Find the edge that reaches the goal
-        for e in self.best_path:
-            if e[-1] == self.goal:
-                edge = e
-                break  # Stop once we reach the goal
-        else:
-            print("❌ Goal not found in best path!")
-            return  # Exit early
+        # for e in self.best_path:
+        #     if e[-1] == self.goal:
+        #         edge = e
+        #         break  # Stop once we reach the goal
+        # else:
+        #     print("❌ Goal not found in best path!")
+        #     return  # Exit early
 
-        # Ensure edge is assigned
-        if edge is None:
-            print("❌ Error: 'edge' is still None after iteration.")
-            return
+        # # Ensure edge is assigned
+        # if edge is None:
+        #     print("❌ Error: 'edge' is still None after iteration.")
+        #     return
 
-        print("Best path successfully generated.")
+        # print("Best path successfully generated.")
 
         # End
         
@@ -416,7 +377,6 @@ class RRTStar():
             for edge in self.edges:
                 if edge[0] == self.child:  
                     self.best_path.append(edge)
-                    print(f"Best path updated: {self.best_path}")
                     self.child = edge[-1]
                     flag = True
                     break
